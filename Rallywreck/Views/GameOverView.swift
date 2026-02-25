@@ -69,5 +69,8 @@ struct GameOverView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NeonTheme.background)
+        .onAppear {
+            Haptics.gameOver()
+        }
     }
 }
