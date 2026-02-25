@@ -136,8 +136,8 @@ struct GamePhaseTests {
         #expect(GamePhase.playing == GamePhase.playing)
         #expect(GamePhase.countdown(remaining: 3) == GamePhase.countdown(remaining: 3))
         #expect(GamePhase.countdown(remaining: 3) != GamePhase.countdown(remaining: 2))
-        #expect(GamePhase.elimination(eliminatedPlayerName: "A") == GamePhase.elimination(eliminatedPlayerName: "A"))
-        #expect(GamePhase.elimination(eliminatedPlayerName: "A") != GamePhase.elimination(eliminatedPlayerName: "B"))
+        #expect(GamePhase.elimination(eliminatedPlayerID: "id", eliminatedPlayerName: "A") == GamePhase.elimination(eliminatedPlayerID: "id", eliminatedPlayerName: "A"))
+        #expect(GamePhase.elimination(eliminatedPlayerID: "id", eliminatedPlayerName: "A") != GamePhase.elimination(eliminatedPlayerID: "id", eliminatedPlayerName: "B"))
         #expect(GamePhase.gameOver(winnerName: "X") == GamePhase.gameOver(winnerName: "X"))
         #expect(GamePhase.playerLeft(playerName: "Y") == GamePhase.playerLeft(playerName: "Y"))
     }
@@ -147,7 +147,7 @@ struct GamePhaseTests {
             .lobby,
             .countdown(remaining: 2),
             .playing,
-            .elimination(eliminatedPlayerName: "Test"),
+            .elimination(eliminatedPlayerID: "id", eliminatedPlayerName: "Test"),
             .playerLeft(playerName: "Left"),
             .gameOver(winnerName: "Winner"),
         ]
@@ -486,7 +486,7 @@ struct ClientMessageHandlerTests {
         #expect(state.players.first(where: { $0.id == "p1" })?.isEliminated == true)
         #expect(state.players.first(where: { $0.id == "p2" })?.isEliminated == false)
         #expect(state.eliminationStandings.count == 1)
-        #expect(state.phase == .elimination(eliminatedPlayerName: "Alice"))
+        #expect(state.phase == .elimination(eliminatedPlayerID: "p1", eliminatedPlayerName: "Alice"))
     }
 
     @Test func gameOverSetsPhaseAndStandings() {

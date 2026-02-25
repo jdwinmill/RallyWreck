@@ -1,5 +1,6 @@
 import AVFoundation
 import Observation
+import os
 
 @Observable
 final class SynthEngine {
@@ -9,7 +10,11 @@ final class SynthEngine {
 
     // Active tone state (accessed from render thread via atomic-like pattern)
     private var activeTones: [(frequency: Double, waveform: Waveform, startSample: Int, duration: Int, sweep: Double?)] = []
-    private let lock = NSLock()
+    private let lock: os_unfair_lock_t = {
+        let lock = os_unfair_lock_t.allocate(capacity: 1)
+        lock.initialize(to: os_unfair_lock())
+        return lock
+    }()
     private var sampleRate: Double = 44100
     private var currentSample: Int = 0
 
@@ -28,11 +33,11 @@ final class SynthEngine {
             guard let self else { return noErr }
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
 
-            self.lock.lock()
+            os_unfair_lock_lock(self.lock)
             let tones = self.activeTones
             let sample = self.currentSample
             self.currentSample += Int(frameCount)
-            self.lock.unlock()
+            os_unfair_lock_unlock(self.lock)
 
             for frame in 0..<Int(frameCount) {
                 var value: Float = 0.0
@@ -104,9 +109,9 @@ final class SynthEngine {
             engine.detach(node)
             sourceNode = nil
         }
-        lock.lock()
+        os_unfair_lock_lock(lock)
         activeTones.removeAll()
-        lock.unlock()
+        os_unfair_lock_unlock(lock)
         isRunning = false
     }
 
@@ -161,13 +166,13 @@ final class SynthEngine {
 
     private func scheduleTone(frequency: Double, waveform: Waveform, durationMs: Int, delayMs: Int = 0, sweepTo: Double? = nil) {
         guard isRunning else { return }
-        lock.lock()
+        os_unfair_lock_lock(lock)
         let start = currentSample + Int(Double(delayMs) / 1000.0 * sampleRate)
         let duration = Int(Double(durationMs) / 1000.0 * sampleRate)
         activeTones.append((frequency, waveform, start, duration, sweepTo))
 
         // Clean up expired tones
         activeTones.removeAll { currentSample > $0.startSample + $0.duration + Int(sampleRate * 0.1) }
-        lock.unlock()
+        os_unfair_lock_unlock(lock)
     }
 }

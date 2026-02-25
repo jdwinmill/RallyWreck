@@ -145,10 +145,12 @@ struct HomeView: View {
         // 1. We don't re-send when meshing with other clients
         // 2. Other clients' stale callbacks don't re-fire when we mesh with them
         var joinRequestSent = false
-        multipeerService.onPeerConnected = { peer in
+        multipeerService.onPeerConnected = { [self] peer in
             guard !joinRequestSent else { return }
             joinRequestSent = true
             isJoining = false
+            joinTimeoutTask?.cancel()
+            joinTimeoutTask = nil
             // Send directly to this peer (the host) — not sendToAll,
             // which would also hit other clients in the mesh.
             multipeerService.send(.joinRequest(

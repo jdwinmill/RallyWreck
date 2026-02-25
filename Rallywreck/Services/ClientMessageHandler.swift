@@ -45,7 +45,7 @@ struct ClientMessageHandler {
                 gameState.players[index].isEliminated = true
                 gameState.eliminationStandings.insert(gameState.players[index], at: 0)
             }
-            gameState.phase = .elimination(eliminatedPlayerName: playerName)
+            gameState.phase = .elimination(eliminatedPlayerID: playerID, eliminatedPlayerName: playerName)
 
         case .gameOver(_, let winnerName, let standings):
             gameState.eliminationStandings = standings

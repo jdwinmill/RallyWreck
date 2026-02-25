@@ -84,8 +84,8 @@ struct GameView: View {
             }
 
             // Elimination overlay (only for the eliminated player)
-            if case .elimination(let name) = gameState.phase {
-                let isMe = gameState.localPlayer?.displayName == name
+            if case .elimination(let eliminatedID, let name) = gameState.phase {
+                let isMe = gameState.localPlayer?.id == eliminatedID
                 if isMe {
                     EliminationOverlay(playerName: name, isLocalPlayer: true)
                         .onAppear {
@@ -203,8 +203,8 @@ struct GameView: View {
 
             if gameState.isHost {
                 gameManager.handleTap(playerID: localID)
-            } else {
-                multipeerService?.sendToAll(.tapAction(playerID: localID))
+            } else if let hostPeer = multipeerService?.hostPeerID {
+                multipeerService?.send(.tapAction(playerID: localID), to: [hostPeer])
             }
         } label: {
             Circle()
@@ -244,11 +244,12 @@ struct GameView: View {
     }
 
     private func exitGame() {
+        synthEngine.stop()
         if gameState.isHost {
             gameManager.returnToLobby()
             // Delay disconnect so returnToLobby message can be delivered
             Task {
-                try? await Task.sleep(for: .milliseconds(300))
+                try? await Task.sleep(for: .seconds(1))
                 multipeerService?.stop()
                 gameState.localPlayer = nil
                 gameState.phase = .lobby

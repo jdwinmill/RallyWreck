@@ -185,7 +185,7 @@ final class GameManager {
         gameState.eliminationStandings.insert(gameState.players[index], at: 0)
 
         let name = gameState.players[index].displayName
-        gameState.phase = .elimination(eliminatedPlayerName: name)
+        gameState.phase = .elimination(eliminatedPlayerID: id, eliminatedPlayerName: name)
 
         multipeerService.sendToAll(.playerEliminated(playerID: id, playerName: name))
 
@@ -197,6 +197,56 @@ final class GameManager {
             guard case .elimination = self?.gameState.phase else { return }
             self?.gameState.phase = .playing
             self?.startNextTurn()
+        }
+    }
+
+    private func handlePeerDisconnectedDuringGame(playerID: String, playerName: String) {
+        // Cancel active turn if the disconnected player was up
+        if gameState.activePlayerID == playerID {
+            turnTimer?.cancel()
+            turnTimer = nil
+        }
+
+        // Mark eliminated
+        if let index = gameState.players.firstIndex(where: { $0.id == playerID }) {
+            gameState.players[index].isEliminated = true
+            gameState.eliminationStandings.insert(gameState.players[index], at: 0)
+        }
+
+        // If already showing an overlay (elimination or playerLeft), wait for it to finish
+        // by letting the existing eliminationTimer complete, then queue this one
+        let isShowingOverlay: Bool
+        switch gameState.phase {
+        case .elimination, .playerLeft:
+            isShowingOverlay = true
+        default:
+            isShowingOverlay = false
+        }
+
+        if isShowingOverlay {
+            // Let the current overlay finish, then show playerLeft
+            let existingTimer = eliminationTimer
+            eliminationTimer = Task { [weak self] in
+                // Wait for the existing timer to complete
+                _ = await existingTimer?.value
+                guard !Task.isCancelled else { return }
+                self?.gameState.phase = .playerLeft(playerName: playerName)
+                try? await Task.sleep(for: .seconds(2.0))
+                guard !Task.isCancelled else { return }
+                guard case .playerLeft = self?.gameState.phase else { return }
+                self?.gameState.phase = .playing
+                self?.startNextTurn()
+            }
+        } else {
+            gameState.phase = .playerLeft(playerName: playerName)
+            eliminationTimer?.cancel()
+            eliminationTimer = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2.0))
+                guard !Task.isCancelled else { return }
+                guard case .playerLeft = self?.gameState.phase else { return }
+                self?.gameState.phase = .playing
+                self?.startNextTurn()
+            }
         }
     }
 
@@ -257,28 +307,7 @@ final class GameManager {
             gameState.players.removeAll { $0.id == playerID }
             multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
         } else {
-            // Cancel active turn if the disconnected player was up
-            if gameState.activePlayerID == playerID {
-                turnTimer?.cancel()
-                turnTimer = nil
-            }
-
-            // Mark eliminated and remove
-            if let index = gameState.players.firstIndex(where: { $0.id == playerID }) {
-                gameState.players[index].isEliminated = true
-                gameState.eliminationStandings.insert(gameState.players[index], at: 0)
-            }
-
-            // Show "player left" overlay, then continue
-            gameState.phase = .playerLeft(playerName: playerName)
-            eliminationTimer?.cancel()
-            eliminationTimer = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2.0))
-                guard !Task.isCancelled else { return }
-                guard case .playerLeft = self?.gameState.phase else { return }
-                self?.gameState.phase = .playing
-                self?.startNextTurn()
-            }
+            handlePeerDisconnectedDuringGame(playerID: playerID, playerName: playerName)
         }
     }
 }
