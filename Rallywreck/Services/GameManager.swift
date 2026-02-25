@@ -13,8 +13,8 @@ final class GameManager {
     private let minimumDuration: TimeInterval = 0.5
 
     // Bot mode for solo testing
-    private(set) var botEnabled: Bool = false
-    private var botPlayer: Player?
+    private(set) var botPlayers: [Player] = []
+    var botEnabled: Bool { !botPlayers.isEmpty }
     private var botTimer: Task<Void, Never>?
 
     init(multipeerService: MultipeerService, gameState: GameState) {
@@ -41,22 +41,20 @@ final class GameManager {
         }
     }
 
-    func enableBot() {
-        botEnabled = true
-        botPlayer = Player(displayName: "Bot")
-        if let bot = botPlayer {
-            gameState.players.append(bot)
-            multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
-        }
+    func addBot() {
+        guard gameState.players.count < 5 else { return }
+        let botNumber = botPlayers.count + 1
+        let bot = Player(displayName: "Bot \(botNumber)")
+        botPlayers.append(bot)
+        gameState.players.append(bot)
+        multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
     }
 
-    func disableBot() {
-        botEnabled = false
-        if let bot = botPlayer {
-            gameState.players.removeAll { $0.id == bot.id }
-            botPlayer = nil
-            multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
-        }
+    func removeBot() {
+        guard let bot = botPlayers.last else { return }
+        botPlayers.removeLast()
+        gameState.players.removeAll { $0.id == bot.id }
+        multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
     }
 
     func startGame() {
@@ -96,6 +94,7 @@ final class GameManager {
     func returnToLobby() {
         turnTimer?.cancel()
         botTimer?.cancel()
+        botPlayers.removeAll()
         gameState.reset()
         multipeerService.sendToAll(.returnToLobby(roster: gameState.players))
     }
@@ -106,13 +105,16 @@ final class GameManager {
         let active = gameState.activePlayers
 
         // Check win condition
-        if active.count <= 1 {
+        let onlyBotsLeft = !active.isEmpty && active.allSatisfy { p in botPlayers.contains { $0.id == p.id } }
+        if active.count <= 1 || onlyBotsLeft {
+            // If only bots remain, the last eliminated human is the implicit "loser" —
+            // pick the first remaining active player as the nominal winner.
             let winner = active.first ?? gameState.players.first!
             gameState.phase = .gameOver(winnerName: winner.displayName)
             multipeerService.sendToAll(.gameOver(
                 winnerID: winner.id,
                 winnerName: winner.displayName,
-                standings: gameState.eliminationStandings + [winner]
+                standings: gameState.eliminationStandings + active
             ))
             return
         }
@@ -134,8 +136,8 @@ final class GameManager {
         ))
 
         // If the chosen player is a bot, auto-tap after a random delay
-        if botEnabled, chosen.id == botPlayer?.id {
-            scheduleBotTap(duration: currentTurnDuration)
+        if botPlayers.contains(where: { $0.id == chosen.id }) {
+            scheduleBotTap(botID: chosen.id, duration: currentTurnDuration)
         }
 
         // Start countdown timer
@@ -148,16 +150,14 @@ final class GameManager {
         }
     }
 
-    private func scheduleBotTap(duration: TimeInterval) {
+    private func scheduleBotTap(botID: String, duration: TimeInterval) {
         botTimer?.cancel()
         botTimer = Task { [weak self] in
             // Bot reacts between 30-80% of the available time
             let reactionTime = duration * Double.random(in: 0.3...0.8)
             try? await Task.sleep(for: .seconds(reactionTime))
             guard !Task.isCancelled else { return }
-            if let botID = self?.botPlayer?.id {
-                self?.handleTap(playerID: botID)
-            }
+            self?.handleTap(playerID: botID)
         }
     }
 

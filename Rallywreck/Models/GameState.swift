@@ -1,9 +1,30 @@
 import Foundation
 import Observation
 
+enum Difficulty: String {
+    case standard, hard
+
+    var label: String {
+        switch self {
+        case .standard: "STANDARD"
+        case .hard: "HARD"
+        }
+    }
+
+    static let buttonSizes: [CGFloat] = [200, 150, 110, 80]
+
+    func buttonSize() -> CGFloat {
+        switch self {
+        case .standard: 200
+        case .hard: Self.buttonSizes.randomElement()!
+        }
+    }
+}
+
 @Observable
 final class GameState {
     var phase: GamePhase = .lobby
+    var difficulty: Difficulty = .standard
     var players: [Player] = []
     var localPlayer: Player?
     var isHost: Bool = false

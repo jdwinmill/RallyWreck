@@ -5,7 +5,7 @@ struct HomeView: View {
     let multipeerService: MultipeerService
     let gameManager: GameManager
 
-    @State private var playerName: String = ""
+    @AppStorage("playerName") private var playerName: String = ""
     @State private var isJoining: Bool = false
 
     var body: some View {

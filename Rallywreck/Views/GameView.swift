@@ -4,15 +4,19 @@ struct GameView: View {
     let gameState: GameState
     let gameManager: GameManager
     var multipeerService: MultipeerService?
+    let synthEngine: SynthEngine
 
     @State private var lastCountdown: Int?
     @State private var buttonScale: CGFloat = 1.0
+    @State private var buttonPosition: CGPoint = .zero
+    @State private var playAreaSize: CGSize = .zero
+    @State private var currentButtonSize: CGFloat = 200
 
     var body: some View {
         ZStack {
             NeonTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 24) {
+            VStack(spacing: 16) {
                 // Player list (compact)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
@@ -28,26 +32,38 @@ struct GameView: View {
                 }
                 .padding(.top, 20)
 
-                Spacer()
-
-                // Status text above button
+                // Status text
                 statusText
 
-                // Always-visible tap button
-                tapButton
+                // Play area with moving button
+                GeometryReader { geo in
+                    ZStack {
+                        // Tap button positioned randomly
+                        tapButton
+                            .position(buttonPosition)
+                            .animation(.spring(response: 0.5, dampingFraction: 0.7), value: buttonPosition)
 
-                // Timer bar
-                if case .playing = gameState.phase,
-                   let startDate = gameState.turnStartDate {
-                    TimerBarView(duration: gameState.turnDuration, startDate: startDate)
-                        .padding(.horizontal, NeonTheme.paddingLarge)
-                } else {
-                    // Reserve space so layout doesn't shift
-                    Color.clear.frame(height: 32)
-                        .padding(.horizontal, NeonTheme.paddingLarge)
+                        // Timer bar at bottom
+                        VStack {
+                            Spacer()
+                            if case .playing = gameState.phase,
+                               let startDate = gameState.turnStartDate {
+                                TimerBarView(duration: gameState.turnDuration, startDate: startDate)
+                                    .padding(.horizontal, NeonTheme.paddingLarge)
+                            } else {
+                                Color.clear.frame(height: 32)
+                                    .padding(.horizontal, NeonTheme.paddingLarge)
+                            }
+                        }
+                    }
+                    .onAppear {
+                        playAreaSize = geo.size
+                        buttonPosition = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+                    }
+                    .onChange(of: geo.size) { _, newSize in
+                        playAreaSize = newSize
+                    }
                 }
-
-                Spacer()
             }
 
             // Elimination overlay
@@ -55,18 +71,28 @@ struct GameView: View {
                 EliminationOverlay(playerName: name)
                     .onAppear {
                         Haptics.elimination()
+                        synthEngine.playElimination()
                     }
             }
+        }
+        .onAppear {
+            synthEngine.start()
         }
         .onChange(of: countdownValue) { _, newValue in
             if let v = newValue {
                 lastCountdown = v
                 Haptics.countdown()
+                synthEngine.playCountdown(remaining: v)
             }
+        }
+        .onChange(of: gameState.activePlayerID) { _, _ in
+            currentButtonSize = gameState.difficulty.buttonSize()
+            randomizeButtonPosition()
         }
         .onChange(of: gameState.isMyTurn) { _, isMyTurn in
             if isMyTurn {
                 Haptics.yourTurn()
+                synthEngine.playYourTurn()
             }
         }
     }
@@ -108,6 +134,7 @@ struct GameView: View {
         return Button {
             guard isActive, let localID = gameState.localPlayer?.id else { return }
             Haptics.tap()
+            synthEngine.playTap()
             withAnimation(.easeOut(duration: 0.1)) { buttonScale = 0.85 }
             withAnimation(.easeOut(duration: 0.1).delay(0.1)) { buttonScale = 1.0 }
 
@@ -124,11 +151,11 @@ struct GameView: View {
                             ? [NeonTheme.neonGreen, NeonTheme.neonGreen.opacity(0.3)]
                             : [NeonTheme.surfaceLight, NeonTheme.surfaceDark],
                         center: .center,
-                        startRadius: 20,
-                        endRadius: 100
+                        startRadius: currentButtonSize * 0.1,
+                        endRadius: currentButtonSize * 0.5
                     )
                 )
-                .frame(width: 200, height: 200)
+                .frame(width: currentButtonSize, height: currentButtonSize)
                 .overlay(
                     Circle()
                         .stroke(
@@ -138,7 +165,7 @@ struct GameView: View {
                 )
                 .overlay(
                     Text("TAP!")
-                        .font(NeonTheme.titleFont)
+                        .font(.system(size: currentButtonSize * 0.2, weight: .black, design: .rounded))
                         .foregroundStyle(isActive ? .white : .gray.opacity(0.3))
                 )
                 .shadow(color: isActive ? NeonTheme.neonGreen.opacity(0.6) : .clear, radius: isActive ? 30 : 0)
@@ -146,6 +173,18 @@ struct GameView: View {
         }
         .disabled(!isActive)
         .animation(.easeInOut(duration: 0.25), value: isActive)
+    }
+
+    private func randomizeButtonPosition() {
+        let margin: CGFloat = 120
+        let minX = margin
+        let maxX = max(margin, playAreaSize.width - margin)
+        let minY = margin
+        let maxY = max(margin, playAreaSize.height - margin)
+        buttonPosition = CGPoint(
+            x: CGFloat.random(in: minX...maxX),
+            y: CGFloat.random(in: minY...maxY)
+        )
     }
 
     private var isPlayingPhase: Bool {

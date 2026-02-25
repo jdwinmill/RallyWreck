@@ -4,6 +4,7 @@ struct ContentView: View {
     let gameState: GameState
     let multipeerService: MultipeerService
     let gameManager: GameManager
+    let synthEngine: SynthEngine
 
     var body: some View {
         Group {
@@ -27,14 +28,16 @@ struct ContentView: View {
                 GameView(
                     gameState: gameState,
                     gameManager: gameManager,
-                    multipeerService: multipeerService
+                    multipeerService: multipeerService,
+                    synthEngine: synthEngine
                 )
 
             case .gameOver(let winnerName):
                 GameOverView(
                     gameState: gameState,
                     gameManager: gameManager,
-                    winnerName: winnerName
+                    winnerName: winnerName,
+                    synthEngine: synthEngine
                 )
             }
         }

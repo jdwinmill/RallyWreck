@@ -5,6 +5,7 @@ struct RallywreckApp: App {
     @State private var gameState = GameState()
     @State private var multipeerService = MultipeerService()
     @State private var gameManager: GameManager?
+    @State private var synthEngine = SynthEngine()
 
     var body: some Scene {
         WindowGroup {
@@ -14,7 +15,8 @@ struct RallywreckApp: App {
                 gameManager: gameManager ?? GameManager(
                     multipeerService: multipeerService,
                     gameState: gameState
-                )
+                ),
+                synthEngine: synthEngine
             )
             .onAppear {
                 if gameManager == nil {

@@ -19,6 +19,21 @@ struct LobbyView: View {
                 .foregroundStyle(.gray)
                 .tracking(2)
 
+            if let name = gameState.localPlayer?.displayName {
+                Button {
+                    gameState.localPlayer = nil
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(name)
+                            .font(NeonTheme.captionFont)
+                            .foregroundStyle(.white)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.gray)
+                    }
+                }
+            }
+
             // Player list
             ScrollView {
                 VStack(spacing: 8) {
@@ -38,15 +53,25 @@ struct LobbyView: View {
             // Host controls
             if gameState.isHost {
                 VStack(spacing: 12) {
-                    // Bot toggle for testing
-                    Button(gameManager.botEnabled ? "REMOVE BOT" : "ADD BOT") {
-                        if gameManager.botEnabled {
-                            gameManager.disableBot()
-                        } else {
-                            gameManager.enableBot()
+                    // Bot controls
+                    HStack(spacing: 12) {
+                        Button("ADD BOT") {
+                            gameManager.addBot()
                         }
+                        .buttonStyle(NeonButtonStyle(color: NeonTheme.neonYellow))
+                        .disabled(gameState.players.count >= 5)
+
+                        Button("REMOVE BOT") {
+                            gameManager.removeBot()
+                        }
+                        .buttonStyle(NeonButtonStyle(color: NeonTheme.neonPink))
+                        .disabled(gameManager.botPlayers.isEmpty)
                     }
-                    .buttonStyle(NeonButtonStyle(color: NeonTheme.neonYellow))
+
+                    Button("MODE: \(gameState.difficulty.label)") {
+                        gameState.difficulty = gameState.difficulty == .standard ? .hard : .standard
+                    }
+                    .buttonStyle(NeonButtonStyle(color: gameState.difficulty == .hard ? NeonTheme.neonPink : .gray))
 
                     Button("START GAME") {
                         gameManager.startGame()

@@ -4,6 +4,7 @@ struct GameOverView: View {
     let gameState: GameState
     let gameManager: GameManager
     let winnerName: String
+    let synthEngine: SynthEngine
 
     var body: some View {
         VStack(spacing: 32) {
@@ -71,6 +72,10 @@ struct GameOverView: View {
         .background(NeonTheme.background)
         .onAppear {
             Haptics.gameOver()
+            synthEngine.playGameOver()
+        }
+        .onDisappear {
+            synthEngine.stop()
         }
     }
 }
