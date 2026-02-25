@@ -11,6 +11,7 @@ enum GameMessage: Codable {
 
     // Host -> All
     case lobbyUpdate(roster: [Player])
+    case gameStart(difficulty: String)
     case gameCountdown(remaining: Int)
     case turnStart(activePlayerID: String, duration: TimeInterval)
     case playerEliminated(playerID: String, playerName: String)

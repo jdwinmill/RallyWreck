@@ -8,9 +8,8 @@ final class GameManager {
     private let gameState: GameState
 
     private var turnTimer: Task<Void, Never>?
+    private var eliminationTimer: Task<Void, Never>?
     private var currentTurnDuration: TimeInterval = 3.0
-    private let timerShrinkFactor: Double = 0.92
-    private let minimumDuration: TimeInterval = 0.5
 
     // Bot mode for solo testing
     private(set) var botPlayers: [Player] = []
@@ -59,14 +58,15 @@ final class GameManager {
 
     func startGame() {
         guard gameState.players.count >= 2 else { return }
-        currentTurnDuration = 3.0
+        currentTurnDuration = gameState.difficulty.startingDuration
         gameState.eliminationStandings = []
 
         for i in gameState.players.indices {
             gameState.players[i].isEliminated = false
         }
 
-        // Countdown: 3, 2, 1, GO
+        // Sync difficulty + Countdown: 3, 2, 1, GO
+        multipeerService.sendToAll(.gameStart(difficulty: gameState.difficulty.rawValue))
         Task {
             for i in (1...3).reversed() {
                 gameState.phase = .countdown(remaining: i)
@@ -86,7 +86,8 @@ final class GameManager {
         turnTimer = nil
 
         // Shrink timer
-        currentTurnDuration = max(minimumDuration, currentTurnDuration * timerShrinkFactor)
+        let diff = gameState.difficulty
+        currentTurnDuration = max(diff.minimumDuration, currentTurnDuration * diff.shrinkFactor)
 
         startNextTurn()
     }
@@ -94,6 +95,7 @@ final class GameManager {
     func returnToLobby() {
         turnTimer?.cancel()
         botTimer?.cancel()
+        eliminationTimer?.cancel()
         botPlayers.removeAll()
         gameState.reset()
         multipeerService.sendToAll(.returnToLobby(roster: gameState.players))
@@ -102,20 +104,24 @@ final class GameManager {
     // MARK: - Private
 
     private func startNextTurn() {
+        turnTimer?.cancel()
+        turnTimer = nil
+
         let active = gameState.activePlayers
 
         // Check win condition
         let onlyBotsLeft = !active.isEmpty && active.allSatisfy { p in botPlayers.contains { $0.id == p.id } }
         if active.count <= 1 || onlyBotsLeft {
-            // If only bots remain, the last eliminated human is the implicit "loser" —
-            // pick the first remaining active player as the nominal winner.
-            let winner = active.first ?? gameState.players.first!
-            gameState.phase = .gameOver(winnerName: winner.displayName)
-            multipeerService.sendToAll(.gameOver(
-                winnerID: winner.id,
-                winnerName: winner.displayName,
-                standings: gameState.eliminationStandings + active
-            ))
+            let winner = active.first ?? gameState.players.first
+            let winnerName = winner?.displayName ?? "Nobody"
+            gameState.phase = .gameOver(winnerName: winnerName)
+            if let winner {
+                multipeerService.sendToAll(.gameOver(
+                    winnerID: winner.id,
+                    winnerName: winner.displayName,
+                    standings: gameState.eliminationStandings + active
+                ))
+            }
             return
         }
 
@@ -124,7 +130,7 @@ final class GameManager {
         if candidates.count > 1, let current = gameState.activePlayerID {
             candidates.removeAll { $0.id == current }
         }
-        let chosen = candidates.randomElement()!
+        guard let chosen = candidates.randomElement() else { return }
 
         gameState.activePlayerID = chosen.id
         gameState.turnDuration = currentTurnDuration
@@ -152,9 +158,9 @@ final class GameManager {
 
     private func scheduleBotTap(botID: String, duration: TimeInterval) {
         botTimer?.cancel()
+        let range = gameState.difficulty.botReactionRange
         botTimer = Task { [weak self] in
-            // Bot reacts between 30-80% of the available time
-            let reactionTime = duration * Double.random(in: 0.3...0.8)
+            let reactionTime = duration * Double.random(in: range)
             try? await Task.sleep(for: .seconds(reactionTime))
             guard !Task.isCancelled else { return }
             self?.handleTap(playerID: botID)
@@ -172,11 +178,13 @@ final class GameManager {
         multipeerService.sendToAll(.playerEliminated(playerID: id, playerName: name))
 
         // Brief pause to show elimination, then next turn
-        Task {
+        eliminationTimer?.cancel()
+        eliminationTimer = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.0))
-            guard case .elimination = gameState.phase else { return }
-            gameState.phase = .playing
-            startNextTurn()
+            guard !Task.isCancelled else { return }
+            guard case .elimination = self?.gameState.phase else { return }
+            self?.gameState.phase = .playing
+            self?.startNextTurn()
         }
     }
 
@@ -218,16 +226,33 @@ final class GameManager {
 
     private func handlePeerDisconnected(_ peer: MCPeerID) {
         guard let playerID = multipeerService.peerToPlayerID[peer] else { return }
-        gameState.players.removeAll { $0.id == playerID }
+        let playerName = gameState.players.first(where: { $0.id == playerID })?.displayName ?? "Player"
 
         if case .lobby = gameState.phase {
+            gameState.players.removeAll { $0.id == playerID }
             multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
         } else {
-            // If mid-game and it was the active player, treat as elimination
+            // Cancel active turn if the disconnected player was up
             if gameState.activePlayerID == playerID {
-                eliminatePlayer(id: playerID)
-            } else if let index = gameState.players.firstIndex(where: { $0.id == playerID }) {
+                turnTimer?.cancel()
+                turnTimer = nil
+            }
+
+            // Mark eliminated and remove
+            if let index = gameState.players.firstIndex(where: { $0.id == playerID }) {
                 gameState.players[index].isEliminated = true
+                gameState.eliminationStandings.insert(gameState.players[index], at: 0)
+            }
+
+            // Show "player left" overlay, then continue
+            gameState.phase = .playerLeft(playerName: playerName)
+            eliminationTimer?.cancel()
+            eliminationTimer = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2.0))
+                guard !Task.isCancelled else { return }
+                guard case .playerLeft = self?.gameState.phase else { return }
+                self?.gameState.phase = .playing
+                self?.startNextTurn()
             }
         }
     }

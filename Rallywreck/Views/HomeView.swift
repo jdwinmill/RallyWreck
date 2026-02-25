@@ -77,6 +77,21 @@ struct HomeView: View {
                 }
             }
 
+            if let error = gameState.errorMessage {
+                Text(error)
+                    .font(NeonTheme.captionFont)
+                    .foregroundStyle(NeonTheme.neonPink)
+                    .onAppear {
+                        isJoining = false
+                        // Auto-dismiss after 3 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if gameState.errorMessage == error {
+                                gameState.errorMessage = nil
+                            }
+                        }
+                    }
+            }
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -115,6 +130,14 @@ struct HomeView: View {
                 playerName: localPlayer.displayName,
                 playerID: localPlayer.id
             ))
+        }
+
+        // If host disconnects, return to home
+        multipeerService.onPeerDisconnected = { [gameState, multipeerService] _ in
+            multipeerService.stop()
+            gameState.errorMessage = "Host disconnected"
+            gameState.localPlayer = nil
+            gameState.phase = .lobby
         }
     }
 }

@@ -11,6 +11,7 @@ struct GameView: View {
     @State private var buttonPosition: CGPoint = .zero
     @State private var playAreaSize: CGSize = .zero
     @State private var currentButtonSize: CGFloat = 200
+    @State private var showExitConfirmation: Bool = false
 
     var body: some View {
         ZStack {
@@ -31,6 +32,19 @@ struct GameView: View {
                     .padding(.horizontal, NeonTheme.paddingMedium)
                 }
                 .padding(.top, 20)
+                .overlay(alignment: .trailing) {
+                    Button {
+                        showExitConfirmation = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.gray)
+                            .frame(width: 32, height: 32)
+                            .background(NeonTheme.surfaceDark.opacity(0.8))
+                            .clipShape(Circle())
+                    }
+                    .padding(.trailing, NeonTheme.paddingMedium)
+                }
 
                 // Status text
                 statusText
@@ -47,6 +61,7 @@ struct GameView: View {
                         VStack {
                             Spacer()
                             if case .playing = gameState.phase,
+                               gameState.isMyTurn,
                                let startDate = gameState.turnStartDate {
                                 TimerBarView(duration: gameState.turnDuration, startDate: startDate)
                                     .padding(.horizontal, NeonTheme.paddingLarge)
@@ -74,6 +89,14 @@ struct GameView: View {
                         synthEngine.playElimination()
                     }
             }
+
+            // Player left overlay
+            if case .playerLeft(let name) = gameState.phase {
+                PlayerLeftOverlay(playerName: name)
+                    .onAppear {
+                        Haptics.elimination()
+                    }
+            }
         }
         .onAppear {
             synthEngine.start()
@@ -94,6 +117,14 @@ struct GameView: View {
                 Haptics.yourTurn()
                 synthEngine.playYourTurn()
             }
+        }
+        .alert("Leave Game?", isPresented: $showExitConfirmation) {
+            Button("Leave", role: .destructive) {
+                exitGame()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(gameState.isHost ? "This will end the game for everyone." : "You will be removed from the game.")
         }
     }
 
@@ -164,15 +195,29 @@ struct GameView: View {
                         )
                 )
                 .overlay(
-                    Text("TAP!")
-                        .font(.system(size: currentButtonSize * 0.2, weight: .black, design: .rounded))
-                        .foregroundStyle(isActive ? .white : .gray.opacity(0.3))
+                    Group {
+                        if isActive {
+                            Text("TAP!")
+                                .font(.system(size: currentButtonSize * 0.2, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                    }
                 )
                 .shadow(color: isActive ? NeonTheme.neonGreen.opacity(0.6) : .clear, radius: isActive ? 30 : 0)
                 .scaleEffect(buttonScale)
         }
         .disabled(!isActive)
+        .opacity((!isActive && gameState.difficulty.hidesInactiveButton) ? 0 : 1)
         .animation(.easeInOut(duration: 0.25), value: isActive)
+    }
+
+    private func exitGame() {
+        if gameState.isHost {
+            gameManager.returnToLobby()
+        }
+        multipeerService?.stop()
+        gameState.localPlayer = nil
+        gameState.phase = .lobby
     }
 
     private func randomizeButtonPosition() {

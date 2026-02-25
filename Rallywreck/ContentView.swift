@@ -24,7 +24,7 @@ struct ContentView: View {
                     )
                 }
 
-            case .countdown, .playing, .elimination:
+            case .countdown, .playing, .elimination, .playerLeft:
                 GameView(
                     gameState: gameState,
                     gameManager: gameManager,
@@ -51,6 +51,7 @@ struct ContentView: View {
         case .countdown: return "game"
         case .playing: return "game"
         case .elimination: return "game"
+        case .playerLeft: return "game"
         case .gameOver: return "gameOver"
         }
     }

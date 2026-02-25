@@ -19,11 +19,17 @@ struct ClientMessageHandler {
             gameState.players = roster
 
         case .joinRejected(let reason):
-            print("Join rejected: \(reason)")
-            // Could set an error state here for UI display
+            gameState.errorMessage = reason
+            gameState.localPlayer = nil
+            gameState.phase = .lobby
 
         case .lobbyUpdate(let roster):
             gameState.players = roster
+
+        case .gameStart(let difficulty):
+            if let diff = Difficulty(rawValue: difficulty) {
+                gameState.difficulty = diff
+            }
 
         case .gameCountdown(let remaining):
             gameState.phase = .countdown(remaining: remaining)

@@ -21,6 +21,7 @@ struct LobbyView: View {
 
             if let name = gameState.localPlayer?.displayName {
                 Button {
+                    multipeerService.stop()
                     gameState.localPlayer = nil
                 } label: {
                     HStack(spacing: 4) {
@@ -53,7 +54,6 @@ struct LobbyView: View {
             // Host controls
             if gameState.isHost {
                 VStack(spacing: 12) {
-                    // Bot controls
                     HStack(spacing: 12) {
                         Button("ADD BOT") {
                             gameManager.addBot()
@@ -69,9 +69,9 @@ struct LobbyView: View {
                     }
 
                     Button("MODE: \(gameState.difficulty.label)") {
-                        gameState.difficulty = gameState.difficulty == .standard ? .hard : .standard
+                        gameState.difficulty = gameState.difficulty.next()
                     }
-                    .buttonStyle(NeonButtonStyle(color: gameState.difficulty == .hard ? NeonTheme.neonPink : .gray))
+                    .buttonStyle(NeonButtonStyle(color: difficultyColor))
 
                     Button("START GAME") {
                         gameManager.startGame()
@@ -89,5 +89,14 @@ struct LobbyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NeonTheme.background)
+    }
+
+    private var difficultyColor: Color {
+        switch gameState.difficulty {
+        case .easy: NeonTheme.neonGreen
+        case .standard: .gray
+        case .medium: NeonTheme.neonYellow
+        case .hard: NeonTheme.neonPink
+        }
     }
 }
