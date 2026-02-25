@@ -317,6 +317,7 @@ struct GameStateTests {
         let state = GameState()
         let player = Player(displayName: "Me")
         state.localPlayer = player
+        state.players = [player]
         state.activePlayerID = player.id
         #expect(state.isMyTurn == true)
     }
@@ -326,6 +327,7 @@ struct GameStateTests {
         let me = Player(displayName: "Me")
         let other = Player(displayName: "Other")
         state.localPlayer = me
+        state.players = [me, other]
         state.activePlayerID = other.id
         #expect(state.isMyTurn == false)
     }
@@ -333,8 +335,9 @@ struct GameStateTests {
     @Test func isMyTurnWhenEliminated() {
         let state = GameState()
         var player = Player(displayName: "Me")
-        player.isEliminated = true
         state.localPlayer = player
+        player.isEliminated = true
+        state.players = [player]
         state.activePlayerID = player.id
         #expect(state.isMyTurn == false)
     }

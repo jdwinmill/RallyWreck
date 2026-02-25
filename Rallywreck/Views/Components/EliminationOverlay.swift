@@ -5,6 +5,7 @@ struct EliminationOverlay: View {
     let isLocalPlayer: Bool
 
     @State private var showWrecked = false
+    @State private var animationTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -27,12 +28,16 @@ struct EliminationOverlay: View {
         .background(Color.black.opacity(0.7))
         .transition(.opacity)
         .onAppear {
-            Task {
+            animationTask = Task {
                 try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled else { return }
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                     showWrecked = true
                 }
             }
+        }
+        .onDisappear {
+            animationTask?.cancel()
         }
     }
 }

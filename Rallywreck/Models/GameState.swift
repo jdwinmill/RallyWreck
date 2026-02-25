@@ -83,8 +83,9 @@ final class GameState {
     var errorMessage: String?
 
     var isMyTurn: Bool {
-        guard let localPlayer else { return false }
-        return activePlayerID == localPlayer.id && !localPlayer.isEliminated
+        guard let localPlayer,
+              let current = players.first(where: { $0.id == localPlayer.id }) else { return false }
+        return activePlayerID == localPlayer.id && !current.isEliminated
     }
 
     var activePlayers: [Player] {

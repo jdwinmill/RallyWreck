@@ -17,6 +17,7 @@ final class GameManager {
     private(set) var botPlayers: [Player] = []
     var botEnabled: Bool { !botPlayers.isEmpty }
     private var botTimer: Task<Void, Never>?
+    private var nextBotNumber: Int = 1
 
     init(multipeerService: MultipeerService, gameState: GameState) {
         self.multipeerService = multipeerService
@@ -44,8 +45,8 @@ final class GameManager {
 
     func addBot() {
         guard gameState.players.count < 5 else { return }
-        let botNumber = botPlayers.count + 1
-        let bot = Player(displayName: "Bot \(botNumber)")
+        let bot = Player(displayName: "Bot \(nextBotNumber)")
+        nextBotNumber += 1
         botPlayers.append(bot)
         gameState.players.append(bot)
         multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))

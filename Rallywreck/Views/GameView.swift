@@ -116,6 +116,9 @@ struct GameView: View {
         .onAppear {
             synthEngine.start()
         }
+        .onDisappear {
+            safeFlashTask?.cancel()
+        }
         .onChange(of: countdownValue) { _, newValue in
             if let v = newValue {
                 lastCountdown = v
@@ -267,10 +270,10 @@ struct GameView: View {
 
     private func randomizeButtonPosition() {
         let margin: CGFloat = 120
-        let minX = margin
-        let maxX = max(margin, playAreaSize.width - margin)
-        let minY = margin
-        let maxY = max(margin, playAreaSize.height - margin)
+        let minX = min(margin, playAreaSize.width / 2)
+        let maxX = max(minX, playAreaSize.width - margin)
+        let minY = min(margin, playAreaSize.height / 2)
+        let maxY = max(minY, playAreaSize.height - margin)
         buttonPosition = CGPoint(
             x: CGFloat.random(in: minX...maxX),
             y: CGFloat.random(in: minY...maxY)
