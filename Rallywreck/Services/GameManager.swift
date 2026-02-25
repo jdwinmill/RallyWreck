@@ -2,11 +2,13 @@ import Foundation
 import MultipeerConnectivity
 
 /// Host-side game logic: join handling, turn selection, timer, elimination, game over
+@MainActor
 @Observable
 final class GameManager {
     private let multipeerService: MultipeerService
     private let gameState: GameState
 
+    private var countdownTask: Task<Void, Never>?
     private var turnTimer: Task<Void, Never>?
     private var eliminationTimer: Task<Void, Never>?
     private var currentTurnDuration: TimeInterval = 3.0
@@ -61,18 +63,23 @@ final class GameManager {
         currentTurnDuration = gameState.difficulty.startingDuration
         gameState.eliminationStandings = []
 
+        // Stop discovering new players during the game
+        multipeerService.stopBrowsingForPeers()
+
         for i in gameState.players.indices {
             gameState.players[i].isEliminated = false
         }
 
         // Sync difficulty + Countdown: 3, 2, 1, GO
         multipeerService.sendToAll(.gameStart(difficulty: gameState.difficulty.rawValue))
-        Task {
+        countdownTask = Task {
             for i in (1...3).reversed() {
+                guard !Task.isCancelled else { return }
                 gameState.phase = .countdown(remaining: i)
                 multipeerService.sendToAll(.gameCountdown(remaining: i))
                 try? await Task.sleep(for: .seconds(1))
             }
+            guard !Task.isCancelled else { return }
             gameState.phase = .playing
             startNextTurn()
         }
@@ -93,12 +100,17 @@ final class GameManager {
     }
 
     func returnToLobby() {
+        countdownTask?.cancel()
         turnTimer?.cancel()
         botTimer?.cancel()
         eliminationTimer?.cancel()
+        let botIDs = Set(botPlayers.map(\.id))
         botPlayers.removeAll()
+        gameState.players.removeAll { botIDs.contains($0.id) }
         gameState.reset()
         multipeerService.sendToAll(.returnToLobby(roster: gameState.players))
+        // Resume discovering new players
+        multipeerService.resumeBrowsingForPeers()
     }
 
     // MARK: - Private

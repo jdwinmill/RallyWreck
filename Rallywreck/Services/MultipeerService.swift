@@ -20,6 +20,13 @@ final class MultipeerService {
     var connectedPeerCount: Int = 0
     var isConnected: Bool = false
 
+    /// Host-side: nearby players available to invite
+    private(set) var discoveredPeers: [MCPeerID] = []
+
+    /// Client-side: the peer ID of the host we connected to.
+    /// Used to distinguish host disconnects from other client disconnects in the mesh.
+    var hostPeerID: MCPeerID?
+
     // Callbacks
     var onMessageReceived: ((GameMessage, MCPeerID) -> Void)?
     var onPeerConnected: ((MCPeerID) -> Void)?
@@ -54,9 +61,26 @@ final class MultipeerService {
                         handler(false, nil)
                         return
                     }
-                    let shouldAccept = service.isHosting &&
+                    // Clients auto-accept invitations from the host
+                    let shouldAccept = !service.isHosting &&
                         session.connectedPeers.count < 4
                     handler(shouldAccept, session)
+                }
+            },
+            onPeerDiscovered: { [weak self] peer in
+                let service = self
+                Task { @MainActor in
+                    guard let service, service.isHosting else { return }
+                    let alreadyConnected = service.session?.connectedPeers.contains(peer) ?? false
+                    if !alreadyConnected && !service.discoveredPeers.contains(peer) {
+                        service.discoveredPeers.append(peer)
+                    }
+                }
+            },
+            onPeerLost: { [weak self] peer in
+                let service = self
+                Task { @MainActor in
+                    service?.discoveredPeers.removeAll { $0 == peer }
                 }
             }
         )
@@ -64,15 +88,11 @@ final class MultipeerService {
         session!.delegate = coordinator
 
         if asHost {
-            advertiser = MCNearbyServiceAdvertiser(
-                peer: peerID!,
-                discoveryInfo: nil,
-                serviceType: Self.serviceType
-            )
-            advertiser?.delegate = coordinator
-            advertiser?.startAdvertisingPeer()
-        } else {
+            // Host browses for nearby players
             startBrowsing()
+        } else {
+            // Client advertises so the host can discover them
+            startAdvertising()
         }
     }
 
@@ -85,15 +105,38 @@ final class MultipeerService {
         coordinator = nil
         peerToPlayerID = [:]
         playerIDToPeer = [:]
+        discoveredPeers = []
         connectedPeerCount = 0
         isConnected = false
+        hostPeerID = nil
     }
 
-    /// Restart browsing for hosts (client-side). Used for refresh/retry.
-    func restartBrowsing() {
+    /// Restart advertising (client-side). Used for refresh/retry.
+    func restartAdvertising() {
         guard !isHosting else { return }
+        advertiser?.stopAdvertisingPeer()
+        startAdvertising()
+    }
+
+    /// Host invites a discovered peer. Removes them from discoveredPeers optimistically.
+    func invitePeer(_ peer: MCPeerID) {
+        guard isHosting, let browser, let session else { return }
+        discoveredPeers.removeAll { $0 == peer }
+        browser.invitePeer(peer, to: session, withContext: nil, timeout: 30)
+    }
+
+    /// Host pauses browsing (e.g. game started). Clears discovered list.
+    func stopBrowsingForPeers() {
+        guard isHosting else { return }
         browser?.stopBrowsingForPeers()
-        startBrowsing()
+        discoveredPeers = []
+    }
+
+    /// Host resumes browsing (e.g. returned to lobby).
+    func resumeBrowsingForPeers() {
+        guard isHosting else { return }
+        discoveredPeers = []
+        browser?.startBrowsingForPeers()
     }
 
     func mapPeer(_ peer: MCPeerID, toPlayerID playerID: String) {
@@ -133,16 +176,29 @@ final class MultipeerService {
         browser?.startBrowsingForPeers()
     }
 
+    private func startAdvertising() {
+        guard let peerID else { return }
+        advertiser = MCNearbyServiceAdvertiser(
+            peer: peerID,
+            discoveryInfo: nil,
+            serviceType: Self.serviceType
+        )
+        advertiser?.delegate = coordinator
+        advertiser?.startAdvertisingPeer()
+    }
+
     private func handleStateChange(peer: MCPeerID, state: MCSessionState) {
         connectedPeerCount = session?.connectedPeers.count ?? 0
 
         switch state {
         case .connected:
             isConnected = true
+            // Host: remove from discovered list now that they're connected
+            discoveredPeers.removeAll { $0 == peer }
             onPeerConnected?(peer)
-            // Stop browsing once connected (client side)
+            // Stop advertising once connected (client side)
             if !isHosting {
-                browser?.stopBrowsingForPeers()
+                advertiser?.stopAdvertisingPeer()
             }
         case .notConnected:
             isConnected = (session?.connectedPeers.count ?? 0) > 0
@@ -182,17 +238,23 @@ final class MultipeerService {
         nonisolated let onStateChange: @Sendable (MCPeerID, MCSessionState) -> Void
         nonisolated let onDataReceived: @Sendable (Data, MCPeerID) -> Void
         nonisolated let onInvitation: @Sendable (MCPeerID, Data?, @escaping (Bool, MCSession?) -> Void) -> Void
+        nonisolated let onPeerDiscovered: @Sendable (MCPeerID) -> Void
+        nonisolated let onPeerLost: @Sendable (MCPeerID) -> Void
 
         nonisolated init(
             session: MCSession,
             onStateChange: @escaping @Sendable (MCPeerID, MCSessionState) -> Void,
             onDataReceived: @escaping @Sendable (Data, MCPeerID) -> Void,
-            onInvitation: @escaping @Sendable (MCPeerID, Data?, @escaping (Bool, MCSession?) -> Void) -> Void
+            onInvitation: @escaping @Sendable (MCPeerID, Data?, @escaping (Bool, MCSession?) -> Void) -> Void,
+            onPeerDiscovered: @escaping @Sendable (MCPeerID) -> Void,
+            onPeerLost: @escaping @Sendable (MCPeerID) -> Void
         ) {
             self.session = session
             self.onStateChange = onStateChange
             self.onDataReceived = onDataReceived
             self.onInvitation = onInvitation
+            self.onPeerDiscovered = onPeerDiscovered
+            self.onPeerLost = onPeerLost
         }
 
         // MARK: MCSessionDelegate
@@ -236,12 +298,13 @@ final class MultipeerService {
         nonisolated func browser(_ browser: MCNearbyServiceBrowser,
                                  foundPeer peerID: MCPeerID,
                                  withDiscoveryInfo info: [String: String]?) {
-            // Auto-invite the first host found
-            browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
+            onPeerDiscovered(peerID)
         }
 
         nonisolated func browser(_ browser: MCNearbyServiceBrowser,
-                                 lostPeer peerID: MCPeerID) {}
+                                 lostPeer peerID: MCPeerID) {
+            onPeerLost(peerID)
+        }
 
         nonisolated func browser(_ browser: MCNearbyServiceBrowser,
                                  didNotStartBrowsingForPeers error: Error) {

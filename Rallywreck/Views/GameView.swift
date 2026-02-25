@@ -12,6 +12,8 @@ struct GameView: View {
     @State private var playAreaSize: CGSize = .zero
     @State private var currentButtonSize: CGFloat = 200
     @State private var showExitConfirmation: Bool = false
+    @State private var showSafeFlash: Bool = false
+    @State private var safeFlashTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -81,13 +83,26 @@ struct GameView: View {
                 }
             }
 
-            // Elimination overlay
+            // Elimination overlay (only for the eliminated player)
             if case .elimination(let name) = gameState.phase {
-                EliminationOverlay(playerName: name)
-                    .onAppear {
-                        Haptics.elimination()
-                        synthEngine.playElimination()
-                    }
+                let isMe = gameState.localPlayer?.displayName == name
+                if isMe {
+                    EliminationOverlay(playerName: name, isLocalPlayer: true)
+                        .onAppear {
+                            synthEngine.playTimesUp()
+                            Task {
+                                try? await Task.sleep(for: .milliseconds(700))
+                                Haptics.elimination()
+                                synthEngine.playElimination()
+                                Haptics.personalElimination()
+                            }
+                        }
+                } else {
+                    Color.clear
+                        .onAppear {
+                            Haptics.someoneEliminated()
+                        }
+                }
             }
 
             // Player left overlay
@@ -132,7 +147,15 @@ struct GameView: View {
 
     @ViewBuilder
     private var statusText: some View {
-        if case .countdown(let remaining) = gameState.phase {
+        if showSafeFlash {
+            Text("SAFE!")
+                .font(.system(size: 48, weight: .black, design: .rounded))
+                .foregroundStyle(NeonTheme.neonGreen)
+                .shadow(color: NeonTheme.neonGreen.opacity(0.8), radius: 20)
+                .scaleEffect(showSafeFlash ? 1.0 : 0.5)
+                .opacity(showSafeFlash ? 1.0 : 0.0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: showSafeFlash)
+        } else if case .countdown(let remaining) = gameState.phase {
             Text("\(remaining)")
                 .font(.system(size: 100, weight: .black, design: .rounded))
                 .foregroundStyle(NeonTheme.neonCyan)
@@ -164,10 +187,19 @@ struct GameView: View {
 
         return Button {
             guard isActive, let localID = gameState.localPlayer?.id else { return }
-            Haptics.tap()
-            synthEngine.playTap()
+            Haptics.safe()
+            synthEngine.playSafe()
             withAnimation(.easeOut(duration: 0.1)) { buttonScale = 0.85 }
             withAnimation(.easeOut(duration: 0.1).delay(0.1)) { buttonScale = 1.0 }
+
+            // Show SAFE! flash
+            safeFlashTask?.cancel()
+            withAnimation(.easeOut(duration: 0.15)) { showSafeFlash = true }
+            safeFlashTask = Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.2)) { showSafeFlash = false }
+            }
 
             if gameState.isHost {
                 gameManager.handleTap(playerID: localID)
@@ -260,10 +292,24 @@ struct GameView: View {
 enum Haptics {
     private static let impact = UIImpactFeedbackGenerator(style: .heavy)
     private static let rigid = UIImpactFeedbackGenerator(style: .rigid)
+    private static let light = UIImpactFeedbackGenerator(style: .light)
     private static let notification = UINotificationFeedbackGenerator()
 
     static func tap() {
         impact.impactOccurred(intensity: 1.0)
+    }
+
+    static func safe() {
+        notification.notificationOccurred(.success)
+    }
+
+    static func personalElimination() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            notification.notificationOccurred(.error)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            impact.impactOccurred(intensity: 1.0)
+        }
     }
 
     static func yourTurn() {
@@ -280,6 +326,10 @@ enum Haptics {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             impact.impactOccurred(intensity: 1.0)
         }
+    }
+
+    static func someoneEliminated() {
+        light.impactOccurred(intensity: 0.6)
     }
 
     static func gameOver() {
@@ -309,6 +359,16 @@ private struct CompactPlayerBadge: View {
                     Text(String(player.displayName.prefix(1)).uppercased())
                         .font(NeonTheme.captionFont)
                         .foregroundStyle(player.isEliminated ? .gray : color)
+                )
+                .overlay(
+                    Group {
+                        if player.isEliminated {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 22, weight: .black))
+                                .foregroundStyle(NeonTheme.neonRed)
+                                .shadow(color: NeonTheme.neonRed.opacity(0.8), radius: 6)
+                        }
+                    }
                 )
                 .frame(width: 40, height: 40)
                 .shadow(color: isActive ? color.opacity(0.8) : .clear, radius: isActive ? 10 : 0)

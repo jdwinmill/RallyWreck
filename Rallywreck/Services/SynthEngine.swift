@@ -131,6 +131,15 @@ final class SynthEngine {
         scheduleTone(frequency: 440, waveform: .sine, durationMs: 50)
     }
 
+    func playSafe() {
+        scheduleTone(frequency: 600, waveform: .sine, durationMs: 60)
+        scheduleTone(frequency: 900, waveform: .sine, durationMs: 60, delayMs: 60)
+    }
+
+    func playTimesUp() {
+        scheduleTone(frequency: 200, waveform: .square, durationMs: 300, sweepTo: 120)
+    }
+
     func playElimination() {
         scheduleTone(frequency: 400, waveform: .sawtooth, durationMs: 250, sweepTo: 100)
     }

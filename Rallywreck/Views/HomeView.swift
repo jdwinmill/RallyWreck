@@ -79,7 +79,7 @@ struct HomeView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .tint(NeonTheme.neonPink)
-                    Text("Searching for host...")
+                    Text("Waiting for a host to add you...")
                         .font(NeonTheme.captionFont)
                         .foregroundStyle(.gray)
                 }
@@ -139,19 +139,29 @@ struct HomeView: View {
         )
         clientHandler.setupMessageHandling()
 
-        // When connected to host, send the join request
-        multipeerService.onPeerConnected = { _ in
+        // When connected to host, send the join request ONCE.
+        // MCSession is a mesh — onPeerConnected fires for every peer (host + other clients).
+        // We must only send the joinRequest once, then clear the callback so that:
+        // 1. We don't re-send when meshing with other clients
+        // 2. Other clients' stale callbacks don't re-fire when we mesh with them
+        var joinRequestSent = false
+        multipeerService.onPeerConnected = { peer in
+            guard !joinRequestSent else { return }
+            joinRequestSent = true
             isJoining = false
-            multipeerService.sendToAll(.joinRequest(
+            // Send directly to this peer (the host) — not sendToAll,
+            // which would also hit other clients in the mesh.
+            multipeerService.send(.joinRequest(
                 playerName: localPlayer.displayName,
                 playerID: localPlayer.id
-            ))
+            ), to: [peer])
+            // Remember the host peer so we only react to HOST disconnects
+            multipeerService.hostPeerID = peer
         }
 
-        // If host disconnects, return to home.
-        // Only touch shared state (gameState, multipeerService) — not HomeView's @State,
-        // since HomeView may have been replaced by LobbyView/GameView at this point.
-        multipeerService.onPeerDisconnected = { [gameState, multipeerService] _ in
+        // Only react to the HOST disconnecting — not other clients in the mesh.
+        multipeerService.onPeerDisconnected = { [gameState, multipeerService] peer in
+            guard peer == multipeerService.hostPeerID else { return }
             multipeerService.stop()
             gameState.errorMessage = "Host disconnected"
             gameState.localPlayer = nil
@@ -163,10 +173,10 @@ struct HomeView: View {
             gameState.phase = .lobby
         }
 
-        // Timeout after 15 seconds if no host found
+        // Timeout after 30 seconds if no host adds us
         joinTimeoutTask?.cancel()
         joinTimeoutTask = Task {
-            try? await Task.sleep(for: .seconds(15))
+            try? await Task.sleep(for: .seconds(30))
             guard !Task.isCancelled else { return }
             if isJoining {
                 multipeerService.stop()

@@ -1,4 +1,5 @@
 import SwiftUI
+import MultipeerConnectivity
 
 struct LobbyView: View {
     let gameState: GameState
@@ -39,14 +40,46 @@ struct LobbyView: View {
 
             // Player list with pull-to-refresh
             List {
-                ForEach(Array(gameState.players.enumerated()), id: \.element.id) { index, player in
-                    PlayerAvatarView(
-                        player: player,
-                        color: NeonTheme.playerColor(for: index),
-                        showEliminated: false
-                    )
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                Section {
+                    ForEach(Array(gameState.players.enumerated()), id: \.element.id) { index, player in
+                        PlayerAvatarView(
+                            player: player,
+                            color: NeonTheme.playerColor(for: index),
+                            showEliminated: false
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                } header: {
+                    Text("IN GAME")
+                        .font(NeonTheme.captionFont)
+                        .foregroundStyle(.gray)
+                        .tracking(2)
+                }
+
+                if gameState.isHost && !multipeerService.discoveredPeers.isEmpty {
+                    Section {
+                        ForEach(multipeerService.discoveredPeers, id: \.self) { peer in
+                            HStack {
+                                Text(peer.displayName)
+                                    .font(NeonTheme.bodyFont)
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                Button("ADD") {
+                                    multipeerService.invitePeer(peer)
+                                }
+                                .buttonStyle(NeonButtonStyle(color: NeonTheme.neonGreen))
+                                .disabled(gameState.players.count >= 5)
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                    } header: {
+                        Text("NEARBY")
+                            .font(NeonTheme.captionFont)
+                            .foregroundStyle(.gray)
+                            .tracking(2)
+                    }
                 }
             }
             .listStyle(.plain)
@@ -117,9 +150,9 @@ struct LobbyView: View {
         if gameState.isHost {
             // Host: nothing specific to refresh, roster is authoritative
         } else {
-            // Client: restart browsing to find host again if disconnected
+            // Client: restart advertising so the host can rediscover us
             if !multipeerService.isConnected {
-                multipeerService.restartBrowsing()
+                multipeerService.restartAdvertising()
             }
         }
         // Small delay for visual feedback
