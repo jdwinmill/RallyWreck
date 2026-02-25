@@ -214,10 +214,22 @@ struct GameView: View {
     private func exitGame() {
         if gameState.isHost {
             gameManager.returnToLobby()
+            // Delay disconnect so returnToLobby message can be delivered
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                multipeerService?.stop()
+                gameState.localPlayer = nil
+                gameState.phase = .lobby
+            }
+        } else {
+            multipeerService?.stop()
+            gameState.localPlayer = nil
+            gameState.players = []
+            gameState.activePlayerID = nil
+            gameState.turnStartDate = nil
+            gameState.eliminationStandings = []
+            gameState.phase = .lobby
         }
-        multipeerService?.stop()
-        gameState.localPlayer = nil
-        gameState.phase = .lobby
     }
 
     private func randomizeButtonPosition() {

@@ -6,11 +6,11 @@ final class MultipeerService {
     private static let serviceType = "rallywreck"
     private static let maxPlayers = 5
 
-    private var session: MCSession!
-    private var peerID: MCPeerID!
+    private var session: MCSession?
+    private var peerID: MCPeerID?
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
-    private var coordinator: SessionCoordinator!
+    private var coordinator: SessionCoordinator?
 
     // Maps MCPeerID to player UUID string
     private(set) var peerToPlayerID: [MCPeerID: String] = [:]
@@ -18,6 +18,7 @@ final class MultipeerService {
 
     var isHosting: Bool = false
     var connectedPeerCount: Int = 0
+    var isConnected: Bool = false
 
     // Callbacks
     var onMessageReceived: ((GameMessage, MCPeerID) -> Void)?
@@ -25,12 +26,15 @@ final class MultipeerService {
     var onPeerDisconnected: ((MCPeerID) -> Void)?
 
     func start(displayName: String, asHost: Bool) {
+        // Clean up any previous session first
+        stop()
+
         peerID = MCPeerID(displayName: displayName)
-        session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .none)
+        session = MCSession(peer: peerID!, securityIdentity: nil, encryptionPreference: .none)
         isHosting = asHost
 
         coordinator = SessionCoordinator(
-            session: session,
+            session: session!,
             onStateChange: { [weak self] peer, state in
                 let service = self
                 Task { @MainActor in
@@ -46,34 +50,29 @@ final class MultipeerService {
             onInvitation: { [weak self] _, _, handler in
                 let service = self
                 Task { @MainActor in
-                    guard let service else {
+                    guard let service, let session = service.session else {
                         handler(false, nil)
                         return
                     }
                     let shouldAccept = service.isHosting &&
-                        service.session.connectedPeers.count < 4
-                    handler(shouldAccept, service.session)
+                        session.connectedPeers.count < 4
+                    handler(shouldAccept, session)
                 }
             }
         )
 
-        session.delegate = coordinator
+        session!.delegate = coordinator
 
         if asHost {
             advertiser = MCNearbyServiceAdvertiser(
-                peer: peerID,
+                peer: peerID!,
                 discoveryInfo: nil,
                 serviceType: Self.serviceType
             )
             advertiser?.delegate = coordinator
             advertiser?.startAdvertisingPeer()
         } else {
-            browser = MCNearbyServiceBrowser(
-                peer: peerID,
-                serviceType: Self.serviceType
-            )
-            browser?.delegate = coordinator
-            browser?.startBrowsingForPeers()
+            startBrowsing()
         }
     }
 
@@ -83,9 +82,18 @@ final class MultipeerService {
         session?.disconnect()
         advertiser = nil
         browser = nil
+        coordinator = nil
         peerToPlayerID = [:]
         playerIDToPeer = [:]
         connectedPeerCount = 0
+        isConnected = false
+    }
+
+    /// Restart browsing for hosts (client-side). Used for refresh/retry.
+    func restartBrowsing() {
+        guard !isHosting else { return }
+        browser?.stopBrowsingForPeers()
+        startBrowsing()
     }
 
     func mapPeer(_ peer: MCPeerID, toPlayerID playerID: String) {
@@ -94,7 +102,7 @@ final class MultipeerService {
     }
 
     func send(_ message: GameMessage, to peers: [MCPeerID]) {
-        guard !peers.isEmpty else { return }
+        guard let session, !peers.isEmpty else { return }
         do {
             let data = try JSONEncoder().encode(message)
             try session.send(data, toPeers: peers, with: .reliable)
@@ -104,6 +112,7 @@ final class MultipeerService {
     }
 
     func sendToAll(_ message: GameMessage) {
+        guard let session else { return }
         send(message, to: session.connectedPeers)
     }
 
@@ -114,22 +123,39 @@ final class MultipeerService {
 
     // MARK: - Private
 
+    private func startBrowsing() {
+        guard let peerID, session != nil else { return }
+        browser = MCNearbyServiceBrowser(
+            peer: peerID,
+            serviceType: Self.serviceType
+        )
+        browser?.delegate = coordinator
+        browser?.startBrowsingForPeers()
+    }
+
     private func handleStateChange(peer: MCPeerID, state: MCSessionState) {
+        connectedPeerCount = session?.connectedPeers.count ?? 0
+
         switch state {
         case .connected:
-            connectedPeerCount = session.connectedPeers.count
+            isConnected = true
             onPeerConnected?(peer)
             // Stop browsing once connected (client side)
             if !isHosting {
                 browser?.stopBrowsingForPeers()
             }
         case .notConnected:
-            connectedPeerCount = session.connectedPeers.count
+            isConnected = (session?.connectedPeers.count ?? 0) > 0
+
+            // IMPORTANT: Fire callback BEFORE removing mappings so handlers
+            // can still look up peerToPlayerID[peer]
+            onPeerDisconnected?(peer)
+
+            // Now clean up the mappings
             if let playerID = peerToPlayerID[peer] {
                 playerIDToPeer.removeValue(forKey: playerID)
             }
             peerToPlayerID.removeValue(forKey: peer)
-            onPeerDisconnected?(peer)
         case .connecting:
             break
         @unknown default:

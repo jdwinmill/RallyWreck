@@ -5,6 +5,8 @@ struct LobbyView: View {
     let gameManager: GameManager
     let multipeerService: MultipeerService
 
+    @State private var isRefreshing = false
+
     var body: some View {
         VStack(spacing: 24) {
             // Header
@@ -14,39 +16,43 @@ struct LobbyView: View {
                 .shadow(color: NeonTheme.neonCyan.opacity(0.4), radius: 8)
                 .padding(.top, 40)
 
-            Text("\(gameState.players.count) PLAYER\(gameState.players.count == 1 ? "" : "S")")
-                .font(NeonTheme.captionFont)
-                .foregroundStyle(.gray)
-                .tracking(2)
+            HStack(spacing: 8) {
+                Text("\(gameState.players.count) PLAYER\(gameState.players.count == 1 ? "" : "S")")
+                    .font(NeonTheme.captionFont)
+                    .foregroundStyle(.gray)
+                    .tracking(2)
 
-            if let name = gameState.localPlayer?.displayName {
-                Button {
-                    multipeerService.stop()
-                    gameState.localPlayer = nil
-                } label: {
+                if !gameState.isHost {
+                    Text("·")
+                        .foregroundStyle(.gray)
+
                     HStack(spacing: 4) {
-                        Text(name)
-                            .font(NeonTheme.captionFont)
-                            .foregroundStyle(.white)
-                        Image(systemName: "pencil")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.gray)
+                        Circle()
+                            .fill(multipeerService.isConnected ? NeonTheme.neonGreen : NeonTheme.neonPink)
+                            .frame(width: 6, height: 6)
+                        Text(multipeerService.isConnected ? "CONNECTED" : "DISCONNECTED")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(multipeerService.isConnected ? NeonTheme.neonGreen : NeonTheme.neonPink)
                     }
                 }
             }
 
-            // Player list
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(Array(gameState.players.enumerated()), id: \.element.id) { index, player in
-                        PlayerAvatarView(
-                            player: player,
-                            color: NeonTheme.playerColor(for: index),
-                            showEliminated: false
-                        )
-                    }
+            // Player list with pull-to-refresh
+            List {
+                ForEach(Array(gameState.players.enumerated()), id: \.element.id) { index, player in
+                    PlayerAvatarView(
+                        player: player,
+                        color: NeonTheme.playerColor(for: index),
+                        showEliminated: false
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
-                .padding(.horizontal, NeonTheme.paddingMedium)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .refreshable {
+                await refreshLobby()
             }
 
             Spacer()
@@ -81,10 +87,16 @@ struct LobbyView: View {
                 }
                 .padding(.bottom, 40)
             } else {
-                Text("Waiting for host to start...")
-                    .font(NeonTheme.captionFont)
-                    .foregroundStyle(.gray)
-                    .padding(.bottom, 40)
+                VStack(spacing: 8) {
+                    Text("Waiting for host to start...")
+                        .font(NeonTheme.captionFont)
+                        .foregroundStyle(.gray)
+
+                    Text("Pull down to refresh")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.gray.opacity(0.5))
+                }
+                .padding(.bottom, 40)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -98,5 +110,20 @@ struct LobbyView: View {
         case .medium: NeonTheme.neonYellow
         case .hard: NeonTheme.neonPink
         }
+    }
+
+    private func refreshLobby() async {
+        isRefreshing = true
+        if gameState.isHost {
+            // Host: nothing specific to refresh, roster is authoritative
+        } else {
+            // Client: restart browsing to find host again if disconnected
+            if !multipeerService.isConnected {
+                multipeerService.restartBrowsing()
+            }
+        }
+        // Small delay for visual feedback
+        try? await Task.sleep(for: .milliseconds(800))
+        isRefreshing = false
     }
 }

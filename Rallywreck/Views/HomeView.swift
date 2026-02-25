@@ -7,6 +7,7 @@ struct HomeView: View {
 
     @AppStorage("playerName") private var playerName: String = ""
     @State private var isJoining: Bool = false
+    @State private var joinTimeoutTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 32) {
@@ -58,13 +59,20 @@ struct HomeView: View {
                     hostGame()
                 }
                 .buttonStyle(NeonButtonStyle(color: NeonTheme.neonCyan))
-                .disabled(playerName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(playerName.trimmingCharacters(in: .whitespaces).isEmpty || isJoining)
 
-                Button("JOIN GAME") {
-                    joinGame()
+                if isJoining {
+                    Button("CANCEL") {
+                        cancelJoin()
+                    }
+                    .buttonStyle(NeonButtonStyle(color: NeonTheme.neonYellow))
+                } else {
+                    Button("JOIN GAME") {
+                        joinGame()
+                    }
+                    .buttonStyle(NeonButtonStyle(color: NeonTheme.neonPink))
+                    .disabled(playerName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                .buttonStyle(NeonButtonStyle(color: NeonTheme.neonPink))
-                .disabled(playerName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
             if isJoining {
@@ -112,32 +120,79 @@ struct HomeView: View {
         guard !name.isEmpty else { return }
 
         isJoining = true
-        let localPlayer = Player(displayName: name)
-        gameState.localPlayer = localPlayer
+        gameState.errorMessage = nil
         gameState.isHost = false
+
+        // Create a local player reference for the join request.
+        // Do NOT set gameState.localPlayer yet — that triggers navigation
+        // to LobbyView. We stay on HomeView until the host sends joinAccepted.
+        let localPlayer = Player(displayName: name)
+
         multipeerService.start(displayName: name, asHost: false)
 
-        // Set up client-side message handling
+        // Set up client-side message handling.
+        // ClientMessageHandler.joinAccepted will set gameState.localPlayer,
+        // which triggers the transition from HomeView → LobbyView.
         let clientHandler = ClientMessageHandler(
             gameState: gameState,
             multipeerService: multipeerService
         )
         clientHandler.setupMessageHandling()
 
-        // When connected, send join request
+        // When connected to host, send the join request
         multipeerService.onPeerConnected = { _ in
+            isJoining = false
             multipeerService.sendToAll(.joinRequest(
                 playerName: localPlayer.displayName,
                 playerID: localPlayer.id
             ))
         }
 
-        // If host disconnects, return to home
+        // If host disconnects, return to home.
+        // Only touch shared state (gameState, multipeerService) — not HomeView's @State,
+        // since HomeView may have been replaced by LobbyView/GameView at this point.
         multipeerService.onPeerDisconnected = { [gameState, multipeerService] _ in
             multipeerService.stop()
             gameState.errorMessage = "Host disconnected"
             gameState.localPlayer = nil
+            gameState.players = []
+            gameState.isHost = false
+            gameState.activePlayerID = nil
+            gameState.turnStartDate = nil
+            gameState.eliminationStandings = []
             gameState.phase = .lobby
         }
+
+        // Timeout after 15 seconds if no host found
+        joinTimeoutTask?.cancel()
+        joinTimeoutTask = Task {
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled else { return }
+            if isJoining {
+                multipeerService.stop()
+                resetClientState(errorMessage: "No host found. Try again.")
+            }
+        }
+    }
+
+    private func cancelJoin() {
+        joinTimeoutTask?.cancel()
+        joinTimeoutTask = nil
+        multipeerService.stop()
+        resetClientState(errorMessage: nil)
+    }
+
+    private func resetClientState(errorMessage: String?) {
+        isJoining = false
+        joinTimeoutTask?.cancel()
+        joinTimeoutTask = nil
+        gameState.errorMessage = errorMessage
+        gameState.localPlayer = nil
+        gameState.phase = .lobby
+        gameState.players = []
+        gameState.isHost = false
+        gameState.activePlayerID = nil
+        gameState.turnStartDate = nil
+        gameState.eliminationStandings = []
     }
 }

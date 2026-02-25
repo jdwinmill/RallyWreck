@@ -212,6 +212,17 @@ final class GameManager {
             return
         }
 
+        // Duplicate detection: if a player with this ID already exists, update their peer mapping
+        // instead of adding a duplicate entry (handles reconnection)
+        if let existingIndex = gameState.players.firstIndex(where: { $0.id == playerID }) {
+            // Player is reconnecting — update their peer mapping
+            multipeerService.mapPeer(peer, toPlayerID: playerID)
+            let player = gameState.players[existingIndex]
+            multipeerService.send(.joinAccepted(yourPlayer: player, roster: gameState.players), to: [peer])
+            multipeerService.sendToAll(.lobbyUpdate(roster: gameState.players))
+            return
+        }
+
         // Use the player ID they sent so client and host agree
         let player = Player(id: playerID, displayName: playerName)
         multipeerService.mapPeer(peer, toPlayerID: player.id)
@@ -225,6 +236,8 @@ final class GameManager {
     }
 
     private func handlePeerDisconnected(_ peer: MCPeerID) {
+        // NOTE: This is called BEFORE mappings are removed from MultipeerService,
+        // so peerToPlayerID[peer] is still valid here.
         guard let playerID = multipeerService.peerToPlayerID[peer] else { return }
         let playerName = gameState.players.first(where: { $0.id == playerID })?.displayName ?? "Player"
 
