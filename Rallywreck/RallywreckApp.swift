@@ -1,17 +1,29 @@
-//
-//  RallywreckApp.swift
-//  Rallywreck
-//
-//  Created by Jacob Winmill on 2/24/26.
-//
-
 import SwiftUI
 
 @main
 struct RallywreckApp: App {
+    @State private var gameState = GameState()
+    @State private var multipeerService = MultipeerService()
+    @State private var gameManager: GameManager?
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(
+                gameState: gameState,
+                multipeerService: multipeerService,
+                gameManager: gameManager ?? GameManager(
+                    multipeerService: multipeerService,
+                    gameState: gameState
+                )
+            )
+            .onAppear {
+                if gameManager == nil {
+                    gameManager = GameManager(
+                        multipeerService: multipeerService,
+                        gameState: gameState
+                    )
+                }
+            }
         }
     }
 }
